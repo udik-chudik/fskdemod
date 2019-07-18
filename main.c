@@ -87,7 +87,7 @@ int main()
             char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
             if (t)
             {
-                printf("DETECTED! => %li\n", samples_counter);
+                //printf("DETECTED! => %li\n", samples_counter);
                 
                 
                 int padding = PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + 10;
@@ -106,17 +106,18 @@ int main()
                         max = r[j];
                     }
                 }
-                printf("%f\n" , max);
+                //printf("%f\n" , max);
+                float prev_sample = 0;
                 for (int i = 0; i < PACKET_LENGTH; i++)
                 {
                     unsigned char byte = 0;
                     for (int j = 0; j < 8; j++)
                     {
-                        float AVG = 80000;
+                        float AVG = max*0.8;
                         float sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL];
-                        float prev_sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL - SAMPLES_PER_SYMBOL];
+                        //float prev_sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL - SAMPLES_PER_SYMBOL];
                         float p = 0;
-                        /*
+                        //p = 0;
                         if (j || i)
                         {
                             if (prev_sample > 0)
@@ -126,10 +127,10 @@ int main()
                                 p = prev_sample + AVG;
                             }
                         }
-                        */
                         if (sample < p)
                         {
                             byte = byte << 1 | 1;
+                            prev_sample = sample;
                         } else {
                             byte = byte << 1;
                         }
