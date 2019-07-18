@@ -98,6 +98,8 @@ int main()
                 
                 float * r;
                 windowf_read(wbuf, &r);
+                float threshold = 0;
+                float last_extremum = 0;
                 float max = 0;
                 float min = 0;
                 for (int j = 0; j < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; j++)
@@ -111,6 +113,7 @@ int main()
                         min = r[j];
                     }
                 }
+                
                 //printf("%f\n" , max);
                 float prev_sample = 0;
                 for (int i = 0; i < PACKET_LENGTH; i++)
@@ -118,11 +121,12 @@ int main()
                     unsigned char byte = 0;
                     for (int j = 0; j < 8; j++)
                     {
-                        float AVG = ((max-min)/2)*0.7;
+                        //float AVG = ((max-min)/2)*0.7;
                         float sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL];
                         //float prev_sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL - SAMPLES_PER_SYMBOL];
-                        float p = 0;
+                        //float p = 0;
                         //p = 0;
+                        /*
                         if (j || i)
                         {
                             if (prev_sample > 0)
@@ -132,12 +136,20 @@ int main()
                                 p = prev_sample + AVG;
                             }
                         }
-                        if (sample < p)
+                        */
+                        if (sample < threshold)
                         {
                             byte = byte << 1 | 1;
-                            prev_sample = sample;
+                            //prev_sample = sample;
                         } else {
                             byte = byte << 1;
+                        }
+                        if ( (last_extremum - sample)*(last_extremum - sample) > (max-min)*(max-min)/16 )
+                        {
+                            //If there was extremum change
+                            threshold = (last_extremum + sample)/2;
+                            last_extremum = sample;
+                            
                         }
                     }
                     printf("%x ", byte);
