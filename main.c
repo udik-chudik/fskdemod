@@ -99,11 +99,16 @@ int main()
                 float * r;
                 windowf_read(wbuf, &r);
                 float max = 0;
+                float min = 0;
                 for (int j = 0; j < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; j++)
                 {
                     if (r[j] > max)
                     {
                         max = r[j];
+                    }
+                    if (r[j] < min)
+                    {
+                        min = r[j];
                     }
                 }
                 //printf("%f\n" , max);
@@ -113,7 +118,7 @@ int main()
                     unsigned char byte = 0;
                     for (int j = 0; j < 8; j++)
                     {
-                        float AVG = max*0.8;
+                        float AVG = ((max-min)/2)*0.7;
                         float sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL];
                         //float prev_sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL - SAMPLES_PER_SYMBOL];
                         float p = 0;
