@@ -8,6 +8,8 @@ long unsigned int samples_counter = 0;
 int SAMPLES_PER_SYMBOL;
 int INT_BUFFER_LENGTH = 20;
 windowf intbuf;
+agc_rrrf AGC;
+firfilt_rrrf FILTER;
 
 float readSample()
 {
@@ -30,7 +32,12 @@ float readSample()
     {
         sum += r[i];
     }
-    return sum;
+    float x,y;
+    x = sum/INT_BUFFER_LENGTH;
+    //agc_rrrf_execute(AGC, x, &x);
+    //firfilt_rrrf_push(FILTER, t);
+    //firfilt_rrrf_execute(FILTER, &y); 
+    return x;//crealf(y);
 }
 
 char checkPreambule(float *buf, short length)
@@ -64,11 +71,18 @@ int main()
     windowf wbuf = windowf_create(PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + PACKET_LENGTH*8*SAMPLES_PER_SYMBOL);
     windowf pbuf = windowf_create(PREAMBULE_LENGTH + 1);
     intbuf = windowf_create(INT_BUFFER_LENGTH);
-
-    
-
+    AGC = agc_rrrf_create();
+    agc_rrrf_set_bandwidth(AGC,1e-4f);
+    //agc_crcf_set_gain(AGC,1e-6f,1);
     int co = 0;
     float prev, next;
+    
+    unsigned int h_len=SAMPLES_PER_SYMBOL;  // filter length
+    float fc=0.5f;          // filter cutoff
+    float As=100.0f;         // stop-band attenuation [dB]
+    float mu=0.0f;          // timing offset
+    FILTER = firfilt_rrrf_create_kaiser(h_len,fc,As,mu);
+
 
     prev = readSample();
     windowf_push(wbuf, prev);
@@ -76,6 +90,7 @@ int main()
     {
 
         next = readSample();
+        //printf("%f\n", next);
         windowf_push(wbuf, next);
         if (prev*next < 0)
         {
@@ -89,11 +104,16 @@ int main()
             {
                 //printf("DETECTED! => %li\n", samples_counter);
                 
-                
+                agc_rrrf_unlock(AGC);
                 int padding = PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + 10;
                 for (int j = 0; j < PACKET_LENGTH*8*SAMPLES_PER_SYMBOL; j++)
                 {
                     windowf_push(wbuf, readSample());
+                    /*
+                    if (j == 5*8*SAMPLES_PER_SYMBOL) {
+                        //agc_rrrf_lock(AGC);
+                    }
+                    */
                 }
                 
                 float * r;
@@ -115,7 +135,6 @@ int main()
                 }
                 
                 //printf("%f\n" , max);
-                float prev_sample = 0;
                 for (int i = 0; i < PACKET_LENGTH; i++)
                 {
                     unsigned char byte = 0;
@@ -144,6 +163,7 @@ int main()
                         } else {
                             byte = byte << 1;
                         }
+                        threshold *= 0.9f;
                         if ( (last_extremum - sample)*(last_extremum - sample) > (max-min)*(max-min)/16 )
                         {
                             //If there was extremum change
@@ -151,6 +171,7 @@ int main()
                             last_extremum = sample;
                             
                         }
+                        
                     }
                     printf("%x ", byte);
                 }
@@ -162,7 +183,7 @@ int main()
         }
         prev = next;
         co++;
-        if (samples_counter > 20000)
+        if (samples_counter > 80000)
             return 0;
     }
 }
