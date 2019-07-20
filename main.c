@@ -3,13 +3,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <liquid/liquid.h>
-
+/*
+rtl_fm -p 75 -g 49 -f 437000000 -s 20000 - | sox -t raw -r 20000 -es -b 16 -c 1 - -t raw -r 44000 - sinc 0-2000 compand 0.01,0.01 -100,0 -20 | ~/development/fskdemod/a.out
+*/
 long unsigned int samples_counter = 0;
 int SAMPLES_PER_SYMBOL;
-int INT_BUFFER_LENGTH = 20;
+int INT_BUFFER_LENGTH;
 windowf intbuf;
-agc_rrrf AGC;
-firfilt_rrrf FILTER;
 
 float readSample()
 {
@@ -32,12 +32,7 @@ float readSample()
     {
         sum += r[i];
     }
-    float x,y;
-    x = sum/INT_BUFFER_LENGTH;
-    //agc_rrrf_execute(AGC, x, &x);
-    //firfilt_rrrf_push(FILTER, t);
-    //firfilt_rrrf_execute(FILTER, &y); 
-    return x;//crealf(y);
+    return sum/INT_BUFFER_LENGTH;
 }
 
 char checkPreambule(float *buf, short length)
@@ -46,8 +41,8 @@ char checkPreambule(float *buf, short length)
 
     for (short i = 0; i < length - 1; i++)
     {
-        found &=    buf[i+1] - buf[i] < SAMPLES_PER_SYMBOL*1.3 &&
-                    buf[i+1] - buf[i] > SAMPLES_PER_SYMBOL*0.7;
+        found &=    buf[i+1] - buf[i] < SAMPLES_PER_SYMBOL*1.8 &&
+                    buf[i+1] - buf[i] > SAMPLES_PER_SYMBOL*0.2;
     }
     return found;
 }
@@ -60,39 +55,33 @@ int main()
     short PREAMBULE_LENGTH = 32;
     short PACKET_LENGTH = 22;
 
+
     SAMPLES_PER_SYMBOL = (int)SAMPLING/BAUDRATE;
+
+    INT_BUFFER_LENGTH = (int)SAMPLES_PER_SYMBOL*0.91;
 
     if (SAMPLES_PER_SYMBOL < 2)
     {
         printf("Error: samples per symbol should be greater then 2!\n");
         return -1;
     }
-    
+    if (SAMPLING % BAUDRATE)
+    {
+        printf("Error: samples per symbol shoud be integer!\n");
+        return -1;
+    }
     windowf wbuf = windowf_create(PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + PACKET_LENGTH*8*SAMPLES_PER_SYMBOL);
     windowf pbuf = windowf_create(PREAMBULE_LENGTH + 1);
     intbuf = windowf_create(INT_BUFFER_LENGTH);
-    AGC = agc_rrrf_create();
-    agc_rrrf_set_bandwidth(AGC,1e-4f);
-    //agc_crcf_set_gain(AGC,1e-6f,1);
-    int co = 0;
-    float prev, next;
+
+    windowf_push(wbuf, readSample());
     
-    unsigned int h_len=SAMPLES_PER_SYMBOL;  // filter length
-    float fc=0.5f;          // filter cutoff
-    float As=100.0f;         // stop-band attenuation [dB]
-    float mu=0.0f;          // timing offset
-    FILTER = firfilt_rrrf_create_kaiser(h_len,fc,As,mu);
-
-
-    prev = readSample();
-    windowf_push(wbuf, prev);
     while (1)
     {
-
-        next = readSample();
-        //printf("%f\n", next);
-        windowf_push(wbuf, next);
-        if (prev*next < 0)
+        windowf_push(wbuf, readSample());
+        float * rwbuf;
+        windowf_read(wbuf, &rwbuf);
+        if (rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL - 1]*rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL] < 0)
         {
             //Zero cross detected
 
@@ -102,66 +91,38 @@ int main()
             char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
             if (t)
             {
-                //printf("DETECTED! => %li\n", samples_counter);
+                //printf("PREAMBULE DETECTED! => %li\n", samples_counter);
+
+                int padding = PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + SAMPLES_PER_SYMBOL/2;
                 
-                agc_rrrf_unlock(AGC);
-                int padding = PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + 10;
-                for (int j = 0; j < PACKET_LENGTH*8*SAMPLES_PER_SYMBOL; j++)
-                {
-                    windowf_push(wbuf, readSample());
-                    /*
-                    if (j == 5*8*SAMPLES_PER_SYMBOL) {
-                        //agc_rrrf_lock(AGC);
-                    }
-                    */
-                }
-                
-                float * r;
-                windowf_read(wbuf, &r);
                 float threshold = 0;
                 float last_extremum = 0;
                 float max = 0;
                 float min = 0;
                 for (int j = 0; j < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; j++)
                 {
-                    if (r[j] > max)
+                    if (rwbuf[j] > max)
                     {
-                        max = r[j];
+                        max = rwbuf[j];
                     }
-                    if (r[j] < min)
+                    if (rwbuf[j] < min)
                     {
-                        min = r[j];
+                        min = rwbuf[j];
                     }
-                }
-                
-                //printf("%f\n" , max);
+                }                
+                unsigned char packet[PACKET_LENGTH];
                 for (int i = 0; i < PACKET_LENGTH; i++)
                 {
                     unsigned char byte = 0;
                     for (int j = 0; j < 8; j++)
                     {
-                        //float AVG = ((max-min)/2)*0.7;
-                        float sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL];
-                        //float prev_sample = r[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL - SAMPLES_PER_SYMBOL];
-                        //float p = 0;
-                        //p = 0;
-                        /*
-                        if (j || i)
-                        {
-                            if (prev_sample > 0)
-                            {
-                                p = prev_sample - AVG;
-                            } else {
-                                p = prev_sample + AVG;
-                            }
-                        }
-                        */
+                        float sample = rwbuf[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL];
+                        
                         if (sample < threshold)
                         {
-                            byte = byte << 1 | 1;
-                            //prev_sample = sample;
-                        } else {
                             byte = byte << 1;
+                        } else {
+                            byte = byte << 1 | 1;
                         }
                         threshold *= 0.9f;
                         if ( (last_extremum - sample)*(last_extremum - sample) > (max-min)*(max-min)/16 )
@@ -171,19 +132,23 @@ int main()
                             last_extremum = sample;
                             
                         }
-                        
                     }
-                    printf("%x ", byte);
+                    packet[i] = byte;
                 }
-                printf("\n");
-                
-            }
-            //printf("%i\n", t);
-            
+                if (packet[0]==0x2d && packet[1] == 0xd4) {
+                    
+                    for (int i = 0; i < PACKET_LENGTH; i++)
+                    {
+                        printf("%02X ", packet[i]);
+                    }
+                    //If valid packet has been detected, fill buffer with new data
+                    for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
+                    {
+                        windowf_push(wbuf, readSample());
+                    }
+                    printf("\n");
+                } 
+            } 
         }
-        prev = next;
-        co++;
-        if (samples_counter > 80000)
-            return 0;
     }
 }
