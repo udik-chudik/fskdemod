@@ -3,9 +3,25 @@
 #include <string.h>
 #include <stdlib.h>
 #include <liquid/liquid.h>
+#include <argp.h>
+#include <stdbool.h>
 /*
 rtl_fm -p 75 -g 49 -f 437000000 -s 20000 - | sox -t raw -r 20000 -es -b 16 -c 1 - -t raw -r 44000 - sinc 0-2000 compand 0.01,0.01 -100,0 -20 | ~/development/fskdemod/a.out
 */
+const char *argp_program_version = "argp-ex3 1.0";
+const char *argp_program_bug_address = "<bug-gnu-utils@gnu.org>";
+static char doc[] = "G/FSK demodulator for Si4432";
+static char args_doc[] = "ARG1 ARG2";
+static struct argp_option options[] = {
+  {"baudrate",  'b', "BAUD", 0,  "Symbols baudrate (default 2000)" },
+  {"sampling",  's', "SAMPLING", 0,  "Input sampling rate (default 44000)" },
+  {"preambule-length", 'p', "PREAMBULE_LENGTH", 0,  "Preambule length in bits (default 32)" },
+  {"packet-length", 'l', "PACKET_LENGTH", 0, "Packet total length (exclude preambule) in bytes (default 22)" },
+  {"disable-crc", 'c', 0, 0, "Disable CRC checking (default enabled)" },
+  {"disable-sync", 'y', 0, 0, "Disable sync word checking (default enabled)" },
+  {"invert", 'i', 0, 0, "Invert 0 and 1 (default disabled)" },
+  { 0 }
+};
 long unsigned int samples_counter = 0;
 int SAMPLES_PER_SYMBOL;
 int INT_BUFFER_LENGTH;
@@ -20,6 +36,13 @@ uint16_t crc16(unsigned char* pData, int length)
             wCrc = wCrc & 0x8000 ? (wCrc << 1) ^ 0x8005 : wCrc << 1;
     }
     return wCrc & 0xffff;
+}
+void print_packet(unsigned char * packet, int length)
+{
+    for (int i = 0; i < length; i++)
+    {
+        printf("%02X ", packet[i]);
+    }
 }
 float readSample()
 {
@@ -56,14 +79,67 @@ char checkPreambule(float *buf, short length)
     }
     return found;
 }
-
-
-int main()
+struct arguments
 {
-    int BAUDRATE = 2000;
-    int SAMPLING = 44000;
-    short PREAMBULE_LENGTH = 32;
-    short PACKET_LENGTH = 22;
+    int BAUDRATE;
+    int SAMPLING;
+    short PREAMBULE_LENGTH;
+    short PACKET_LENGTH;
+    bool CRC_CHECK_DISABLE;
+    bool SYNC_WORD_CHECK_DISABLE;
+    bool INVERT;
+};
+
+static error_t parse_opt(int key, char * arg, struct argp_state * state)
+{
+    struct arguments *arguments = state->input;
+    switch (key)
+    {
+        case 'b':
+            arguments->BAUDRATE = atoi(arg);
+            break;
+        case 's':
+            arguments->SAMPLING = atoi(arg);
+            break;
+        case 'l':
+            arguments->PACKET_LENGTH = atoi(arg);
+            break;
+        case 'p':
+            arguments->PREAMBULE_LENGTH = atoi(arg);
+            break;
+        case 'c':
+            arguments->CRC_CHECK_DISABLE = true;
+            break;
+        case 'y':
+            arguments->SYNC_WORD_CHECK_DISABLE = true;
+            break;
+        case 'i':
+            arguments->INVERT = true;
+            break;
+        case ARGP_KEY_ARG:
+            return 0;
+        default:
+            return ARGP_ERR_UNKNOWN;
+    }
+    return 0;
+}
+static struct argp argp = { options, parse_opt, args_doc, doc };
+int main(int argc, char *argv[])
+{
+    struct arguments arguments;
+    arguments.BAUDRATE = 2000;
+    arguments.SAMPLING = 44000;
+    arguments.PREAMBULE_LENGTH = 32;
+    arguments.PACKET_LENGTH = 22;
+    arguments.SYNC_WORD_CHECK_DISABLE = false;
+    arguments.CRC_CHECK_DISABLE = false;
+    arguments.INVERT = false;
+    argp_parse (&argp, argc, argv, 0, 0, &arguments);
+    
+    int BAUDRATE = arguments.BAUDRATE;
+    int SAMPLING = arguments.SAMPLING;
+    short PREAMBULE_LENGTH = arguments.PREAMBULE_LENGTH;
+    short PACKET_LENGTH = arguments.PACKET_LENGTH;
 
 
     SAMPLES_PER_SYMBOL = (int)SAMPLING/BAUDRATE;
@@ -130,9 +206,9 @@ int main()
                         
                         if (sample < threshold)
                         {
-                            byte = byte << 1;
+                            byte = byte << 1 | (arguments.INVERT ? 1 : 0);
                         } else {
-                            byte = byte << 1 | 1;
+                            byte = byte << 1 | (arguments.INVERT ? 0 : 1);
                         }
                         threshold *= 0.9f;
                         if ( (last_extremum - sample)*(last_extremum - sample) > (max-min)*(max-min)/16 )
@@ -145,19 +221,21 @@ int main()
                     }
                     packet[i] = byte;
                 }
-                if (packet[0]==0x2d && packet[1] == 0xd4) {
-                    //Check for CRC
-                    unsigned short received_crc = packet[PACKET_LENGTH-2];
-                    received_crc = received_crc << 8 | packet[PACKET_LENGTH-1];
+                if (!arguments.SYNC_WORD_CHECK_DISABLE && packet[0]==0x2d && packet[1] == 0xd4) {
                     //unsigned short received_crc = (*(unsigned short *)&packet[PACKET_LENGTH-2]);
-                    if (received_crc == crc16(&packet[2], PACKET_LENGTH-2-2))
+                    if (!arguments.CRC_CHECK_DISABLE)
                     {
-                        for (int i = 0; i < PACKET_LENGTH; i++)
+                        //Check for CRC
+                        unsigned short received_crc = packet[PACKET_LENGTH-2];
+                        received_crc = received_crc << 8 | packet[PACKET_LENGTH-1];
+                        if (received_crc == crc16(&packet[2], PACKET_LENGTH-2-2))
                         {
-                            printf("%02X ", packet[i]);
+                            print_packet(packet, PACKET_LENGTH);
+                        } else {
+                            printf("CORRUPTED");
                         }
                     } else {
-                        printf("CORRUPTED");
+                        print_packet(packet, PACKET_LENGTH);
                     }
                     //If valid packet has been detected, fill buffer with new data
                     for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
@@ -165,7 +243,17 @@ int main()
                         windowf_push(wbuf, readSample());
                     }
                     printf("\n");
-                } 
+                }
+                if (arguments.SYNC_WORD_CHECK_DISABLE)
+                {
+                    print_packet(packet, PACKET_LENGTH);
+                    printf("\n");
+                    //If valid packet has been detected, fill buffer with new data
+                    for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
+                    {
+                        windowf_push(wbuf, readSample());
+                    }
+                }
             } 
         }
     }
