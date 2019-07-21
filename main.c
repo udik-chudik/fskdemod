@@ -10,7 +10,17 @@ long unsigned int samples_counter = 0;
 int SAMPLES_PER_SYMBOL;
 int INT_BUFFER_LENGTH;
 windowf intbuf;
-
+uint16_t crc16(unsigned char* pData, int length)
+{
+    uint8_t i;
+    uint16_t wCrc = 0x0000;
+    while (length--) {
+        wCrc ^= *(unsigned char *)pData++ << 8;
+        for (i=0; i < 8; i++)
+            wCrc = wCrc & 0x8000 ? (wCrc << 1) ^ 0x8005 : wCrc << 1;
+    }
+    return wCrc & 0xffff;
+}
 float readSample()
 {
     /*
@@ -41,7 +51,7 @@ char checkPreambule(float *buf, short length)
 
     for (short i = 0; i < length - 1; i++)
     {
-        found &=    buf[i+1] - buf[i] < SAMPLES_PER_SYMBOL*1.8 &&
+        found &=    buf[i+1] - buf[i] < SAMPLES_PER_SYMBOL*2 &&
                     buf[i+1] - buf[i] > SAMPLES_PER_SYMBOL*0.2;
     }
     return found;
@@ -136,10 +146,18 @@ int main()
                     packet[i] = byte;
                 }
                 if (packet[0]==0x2d && packet[1] == 0xd4) {
-                    
-                    for (int i = 0; i < PACKET_LENGTH; i++)
+                    //Check for CRC
+                    unsigned short received_crc = packet[PACKET_LENGTH-2];
+                    received_crc = received_crc << 8 | packet[PACKET_LENGTH-1];
+                    //unsigned short received_crc = (*(unsigned short *)&packet[PACKET_LENGTH-2]);
+                    if (received_crc == crc16(&packet[2], PACKET_LENGTH-2-2))
                     {
-                        printf("%02X ", packet[i]);
+                        for (int i = 0; i < PACKET_LENGTH; i++)
+                        {
+                            printf("%02X ", packet[i]);
+                        }
+                    } else {
+                        printf("CORRUPTED");
                     }
                     //If valid packet has been detected, fill buffer with new data
                     for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
