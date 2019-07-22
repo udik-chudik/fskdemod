@@ -20,6 +20,7 @@ static struct argp_option options[] = {
   {"disable-crc", 'c', 0, 0, "Disable CRC checking (default enabled)" },
   {"disable-sync", 'y', 0, 0, "Disable sync word checking (default enabled)" },
   {"invert", 'i', 0, 0, "Invert 0 and 1 (default disabled)" },
+  {"verbose", 'v', 0, 0, "Print all avaible information" },
   { 0 }
 };
 long unsigned int samples_counter = 0;
@@ -88,6 +89,7 @@ struct arguments
     bool CRC_CHECK_DISABLE;
     bool SYNC_WORD_CHECK_DISABLE;
     bool INVERT;
+    bool VERBOSE;
 };
 
 static error_t parse_opt(int key, char * arg, struct argp_state * state)
@@ -116,6 +118,9 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
         case 'i':
             arguments->INVERT = true;
             break;
+        case 'v':
+            arguments->VERBOSE = true;
+            break;
         case ARGP_KEY_ARG:
             return 0;
         default:
@@ -134,8 +139,15 @@ int main(int argc, char *argv[])
     arguments.SYNC_WORD_CHECK_DISABLE = false;
     arguments.CRC_CHECK_DISABLE = false;
     arguments.INVERT = false;
+    arguments.VERBOSE = false;
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
     
+    if (arguments.VERBOSE)
+    {
+        printf("Using:\nBAUDRATE: %i\nSAMPLING: %i\n", arguments.BAUDRATE, arguments.SAMPLING);
+        printf(" --> %i SAMPLES/SYMBOL\n", (int)arguments.SAMPLING/arguments.BAUDRATE);
+    }
+
     int BAUDRATE = arguments.BAUDRATE;
     int SAMPLING = arguments.SAMPLING;
     short PREAMBULE_LENGTH = arguments.PREAMBULE_LENGTH;
@@ -144,18 +156,20 @@ int main(int argc, char *argv[])
 
     SAMPLES_PER_SYMBOL = (int)SAMPLING/BAUDRATE;
 
-    INT_BUFFER_LENGTH = (int)SAMPLES_PER_SYMBOL*0.91;
-
+    INT_BUFFER_LENGTH = (int)SAMPLES_PER_SYMBOL*0.9;
+    
     if (SAMPLES_PER_SYMBOL < 2)
     {
         printf("Error: samples per symbol should be greater then 2!\n");
         return -1;
     }
+    /*
     if (SAMPLING % BAUDRATE)
     {
         printf("Error: samples per symbol shoud be integer!\n");
         return -1;
     }
+    */
     windowf wbuf = windowf_create(PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + PACKET_LENGTH*8*SAMPLES_PER_SYMBOL);
     windowf pbuf = windowf_create(PREAMBULE_LENGTH + 1);
     intbuf = windowf_create(INT_BUFFER_LENGTH);
@@ -177,7 +191,10 @@ int main(int argc, char *argv[])
             char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
             if (t)
             {
-                //printf("PREAMBULE DETECTED! => %li\n", samples_counter);
+                if (arguments.VERBOSE)
+                {
+                    printf("PREAMBULE DETECTED! => %li (samples from start)\n", samples_counter);
+                }
 
                 int padding = PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + SAMPLES_PER_SYMBOL/2;
                 
@@ -232,7 +249,10 @@ int main(int argc, char *argv[])
                         {
                             print_packet(packet, PACKET_LENGTH);
                         } else {
-                            printf("CORRUPTED");
+                            if (arguments.VERBOSE)
+                            {
+                                printf("Packet detected, but CRC check filed");
+                            }
                         }
                     } else {
                         print_packet(packet, PACKET_LENGTH);
@@ -243,6 +263,11 @@ int main(int argc, char *argv[])
                         windowf_push(wbuf, readSample());
                     }
                     printf("\n");
+                } else if (!arguments.SYNC_WORD_CHECK_DISABLE) {
+                    if (arguments.VERBOSE)
+                    {
+                        printf("SYNC_WORD CHECK FILED\n");
+                    }
                 }
                 if (arguments.SYNC_WORD_CHECK_DISABLE)
                 {
