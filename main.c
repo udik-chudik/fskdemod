@@ -5,6 +5,7 @@
 #include <liquid/liquid.h>
 #include <argp.h>
 #include <stdbool.h>
+#include <math.h>
 /*
 rtl_fm -p 75 -g 49 -f 437000000 -s 20000 - | sox -t raw -r 20000 -es -b 16 -c 1 - -t raw -r 44000 - sinc 0-2000 compand 0.01,0.01 -100,0 -20 | ~/development/fskdemod/a.out
 */
@@ -128,6 +129,28 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
     }
     return 0;
 }
+float correlate(float *preambule, windowf buf, int length)
+{
+    float * rwbuf;
+    windowf_read(buf, &rwbuf);
+    float sum = 0;
+    for (int i = 0; i < length; i++)
+    {
+        sum += rwbuf[i]*preambule[i];
+    }
+    return sum;
+}
+float power(windowf buf, int length)
+{
+    float * rwbuf;
+    windowf_read(buf, &rwbuf);
+    float sum = 0;
+    for (int i = 0; i < length; i++)
+    {
+        sum += abs(rwbuf[i]);
+    }
+    return sum;
+}
 static struct argp argp = { options, parse_opt, args_doc, doc };
 int main(int argc, char *argv[])
 {
@@ -170,26 +193,38 @@ int main(int argc, char *argv[])
         return -1;
     }
     */
+
     windowf wbuf = windowf_create(PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + PACKET_LENGTH*8*SAMPLES_PER_SYMBOL);
     windowf pbuf = windowf_create(PREAMBULE_LENGTH + 1);
     intbuf = windowf_create(INT_BUFFER_LENGTH);
 
     windowf_push(wbuf, readSample());
     
+    /*
+        Generate preambule pattern
+    */
+    float preambule_test[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL];
+    for (int i = 0; i < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; i++)
+    {
+        preambule_test[i] = sin(3.14/2 + i*3.14/SAMPLES_PER_SYMBOL);
+        //printf("%i %f\n", i, preambule_test[i]);
+    }
     while (1)
     {
-        windowf_push(wbuf, readSample());
+        float sample = readSample();
+        windowf_push(wbuf, sample);
         float * rwbuf;
         windowf_read(wbuf, &rwbuf);
-        if (rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL - 1]*rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL] < 0)
+        //printf("%li %f %f %f\n", samples_counter, correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL), sample*100, power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL));
+        if (1/*rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL - 1]*rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL] < 0*/)
         {
             //Zero cross detected
 
-            windowf_push(pbuf, samples_counter);
-            float * r;
-            windowf_read(pbuf, &r);
-            char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
-            if (t)
+            //windowf_push(pbuf, samples_counter);
+            //float * r;
+            //windowf_read(pbuf, &r);
+            //char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
+            if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) > power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*0.3)
             {
                 if (arguments.VERBOSE)
                 {
@@ -248,21 +283,24 @@ int main(int argc, char *argv[])
                         if (received_crc == crc16(&packet[2], PACKET_LENGTH-2-2))
                         {
                             print_packet(packet, PACKET_LENGTH);
+                            printf("\n");
                         } else {
                             if (arguments.VERBOSE)
                             {
                                 printf("Packet detected, but CRC check filed");
+                                printf("\n");
                             }
                         }
                     } else {
                         print_packet(packet, PACKET_LENGTH);
+                        printf("\n");
                     }
                     //If valid packet has been detected, fill buffer with new data
                     for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
                     {
                         windowf_push(wbuf, readSample());
                     }
-                    printf("\n");
+                    
                 } else if (!arguments.SYNC_WORD_CHECK_DISABLE) {
                     if (arguments.VERBOSE)
                     {
