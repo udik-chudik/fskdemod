@@ -129,28 +129,6 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
     }
     return 0;
 }
-float correlate(float *preambule, windowf buf, int length)
-{
-    float * rwbuf;
-    windowf_read(buf, &rwbuf);
-    float sum = 0;
-    for (int i = 0; i < length; i++)
-    {
-        sum += rwbuf[i]*preambule[i];
-    }
-    return sum;
-}
-float power(windowf buf, int length)
-{
-    float * rwbuf;
-    windowf_read(buf, &rwbuf);
-    float sum = 0;
-    for (int i = 0; i < length; i++)
-    {
-        sum += abs(rwbuf[i]);
-    }
-    return sum;
-}
 float avarage(windowf buf, int length)
 {
     float * rwbuf;
@@ -162,6 +140,31 @@ float avarage(windowf buf, int length)
     }
     return sum/length;
 }
+float correlate(float *preambule, windowf buf, int length)
+{
+    float * rwbuf;
+    windowf_read(buf, &rwbuf);
+    float sum = 0;
+    float avg = avarage(buf, length);
+    for (int i = 0; i < length; i++)
+    {
+        sum += (rwbuf[i] - avg)*preambule[i];
+    }
+    return sum;
+}
+float power(windowf buf, int length)
+{
+    float * rwbuf;
+    windowf_read(buf, &rwbuf);
+    float sum = 0;
+    float avg = avarage(buf, length);
+    for (int i = 0; i < length; i++)
+    {
+        sum += abs(rwbuf[i] - avg);
+    }
+    return sum;
+}
+
 static struct argp argp = { options, parse_opt, args_doc, doc };
 int main(int argc, char *argv[])
 {
@@ -217,12 +220,13 @@ int main(int argc, char *argv[])
     float preambule_test[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL];
     for (int i = 0; i < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; i++)
     {
-        preambule_test[i] = sin(3.14/2 + i*3.14/SAMPLES_PER_SYMBOL);
+        float s = sin(3.14/2 + i*3.14/SAMPLES_PER_SYMBOL);
+        preambule_test[i] =  s > 0 ? 1 : (s < 0 ? -1 : 0);
         //printf("%i %f\n", i, preambule_test[i]);
     }
     while (1)
     {
-        float sample = readSample();
+        float sample = readSample() ;
         windowf_push(wbuf, sample);
         float * rwbuf;
         windowf_read(wbuf, &rwbuf);
@@ -235,7 +239,7 @@ int main(int argc, char *argv[])
             //float * r;
             //windowf_read(pbuf, &r);
             //char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
-            if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) > power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*0.7)
+            if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) >= power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*0.99)
             {
                 if (arguments.VERBOSE)
                 {
