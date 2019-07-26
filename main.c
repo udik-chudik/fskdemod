@@ -151,6 +151,17 @@ float power(windowf buf, int length)
     }
     return sum;
 }
+float avarage(windowf buf, int length)
+{
+    float * rwbuf;
+    windowf_read(buf, &rwbuf);
+    float sum = 0;
+    for (int i = 0; i < length; i++)
+    {
+        sum += rwbuf[i];
+    }
+    return sum/length;
+}
 static struct argp argp = { options, parse_opt, args_doc, doc };
 int main(int argc, char *argv[])
 {
@@ -224,7 +235,7 @@ int main(int argc, char *argv[])
             //float * r;
             //windowf_read(pbuf, &r);
             //char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
-            if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) > power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*0.3)
+            if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) > power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*0.7)
             {
                 if (arguments.VERBOSE)
                 {
@@ -237,6 +248,7 @@ int main(int argc, char *argv[])
                 float last_extremum = 0;
                 float max = 0;
                 float min = 0;
+                /*
                 for (int j = 0; j < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; j++)
                 {
                     if (rwbuf[j] > max)
@@ -247,7 +259,9 @@ int main(int argc, char *argv[])
                     {
                         min = rwbuf[j];
                     }
-                }                
+                } 
+                */
+                threshold = avarage(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL);               
                 unsigned char packet[PACKET_LENGTH];
                 for (int i = 0; i < PACKET_LENGTH; i++)
                 {
@@ -262,6 +276,7 @@ int main(int argc, char *argv[])
                         } else {
                             byte = byte << 1 | (arguments.INVERT ? 0 : 1);
                         }
+                        /*
                         threshold *= 0.9f;
                         if ( (last_extremum - sample)*(last_extremum - sample) > (max-min)*(max-min)/16 )
                         {
@@ -270,6 +285,7 @@ int main(int argc, char *argv[])
                             last_extremum = sample;
                             
                         }
+                        */
                     }
                     packet[i] = byte;
                 }
