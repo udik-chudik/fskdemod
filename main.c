@@ -23,6 +23,7 @@ static struct argp_option options[] = {
   {"disable-sync", 'y', 0, 0, "Disable sync word checking (default enabled)" },
   {"invert", 'i', 0, 0, "Invert 0 and 1 (default disabled)" },
   {"verbose", 'v', 0, 0, "Print all avaible information" },
+  {"sync", 'w', "SYNC_WORD", 0, "Sync word folowed after preambule (default 0x2dd4)" },
   { 0 }
 };
 long unsigned int samples_counter = 0;
@@ -93,6 +94,7 @@ struct arguments
     bool INVERT;
     bool VERBOSE;
     float DETECTION_LEVEL;
+    unsigned short SYNC_WORD;
 };
 
 static error_t parse_opt(int key, char * arg, struct argp_state * state)
@@ -126,6 +128,9 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
             break;
         case 'd':
             arguments->DETECTION_LEVEL = atof(arg);
+            break;
+        case 'w':
+            arguments->SYNC_WORD = (unsigned short)strtol(arg, NULL, 16)&0xffff;
             break;
         case ARGP_KEY_ARG:
             return 0;
@@ -183,8 +188,9 @@ int main(int argc, char *argv[])
     arguments.INVERT = false;
     arguments.VERBOSE = false;
     arguments.DETECTION_LEVEL = 0.99;
+    arguments.SYNC_WORD = 0x2dd4;
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
-    
+    //printf("%x\n", arguments.SYNC_WORD);
     if (arguments.VERBOSE)
     {
         printf("Using:\nBAUDRATE: %i\nSAMPLING: %i\n", arguments.BAUDRATE, arguments.SAMPLING);
@@ -299,7 +305,7 @@ int main(int argc, char *argv[])
                     }
                     packet[i] = byte;
                 }
-                if (!arguments.SYNC_WORD_CHECK_DISABLE && packet[0]==0x2d && packet[1] == 0xd4) {
+                if (!arguments.SYNC_WORD_CHECK_DISABLE && packet[0]==(arguments.SYNC_WORD >> 8) && packet[1] == (arguments.SYNC_WORD & 0xFF)) {
                     //unsigned short received_crc = (*(unsigned short *)&packet[PACKET_LENGTH-2]);
                     if (!arguments.CRC_CHECK_DISABLE)
                     {
