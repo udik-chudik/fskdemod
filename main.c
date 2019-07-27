@@ -18,6 +18,7 @@ static struct argp_option options[] = {
   {"sampling",  's', "SAMPLING", 0,  "Input sampling rate (default 44000)" },
   {"preambule-length", 'p', "PREAMBULE_LENGTH", 0,  "Preambule length in bits (default 32)" },
   {"packet-length", 'l', "PACKET_LENGTH", 0, "Packet total length (exclude preambule) in bytes (default 22)" },
+  {"detection-level", 'd', "DETECTION_LEVEL", 0, "Preambule correlation level (default 0.99). Should be lower for low SNR" },
   {"disable-crc", 'c', 0, 0, "Disable CRC checking (default enabled)" },
   {"disable-sync", 'y', 0, 0, "Disable sync word checking (default enabled)" },
   {"invert", 'i', 0, 0, "Invert 0 and 1 (default disabled)" },
@@ -91,6 +92,7 @@ struct arguments
     bool SYNC_WORD_CHECK_DISABLE;
     bool INVERT;
     bool VERBOSE;
+    float DETECTION_LEVEL;
 };
 
 static error_t parse_opt(int key, char * arg, struct argp_state * state)
@@ -121,6 +123,9 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
             break;
         case 'v':
             arguments->VERBOSE = true;
+            break;
+        case 'd':
+            arguments->DETECTION_LEVEL = atof(arg);
             break;
         case ARGP_KEY_ARG:
             return 0;
@@ -177,6 +182,7 @@ int main(int argc, char *argv[])
     arguments.CRC_CHECK_DISABLE = false;
     arguments.INVERT = false;
     arguments.VERBOSE = false;
+    arguments.DETECTION_LEVEL = 0.99;
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
     
     if (arguments.VERBOSE)
@@ -239,7 +245,7 @@ int main(int argc, char *argv[])
             //float * r;
             //windowf_read(pbuf, &r);
             //char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
-            if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) >= power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*0.99)
+            if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) >= power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*arguments.DETECTION_LEVEL)
             {
                 if (arguments.VERBOSE)
                 {
@@ -304,6 +310,11 @@ int main(int argc, char *argv[])
                         {
                             print_packet(packet, PACKET_LENGTH);
                             printf("\n");
+                            //If valid packet has been detected, fill buffer with new data
+                            for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
+                            {
+                                windowf_push(wbuf, readSample());
+                            }
                         } else {
                             if (arguments.VERBOSE)
                             {
@@ -314,12 +325,13 @@ int main(int argc, char *argv[])
                     } else {
                         print_packet(packet, PACKET_LENGTH);
                         printf("\n");
+                        //If valid packet has been detected, fill buffer with new data
+                        for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
+                        {
+                            windowf_push(wbuf, readSample());
+                        }
                     }
-                    //If valid packet has been detected, fill buffer with new data
-                    for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
-                    {
-                        windowf_push(wbuf, readSample());
-                    }
+                    
                     
                 } else if (!arguments.SYNC_WORD_CHECK_DISABLE) {
                     if (arguments.VERBOSE)
