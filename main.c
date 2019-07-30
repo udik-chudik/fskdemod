@@ -24,6 +24,7 @@ static struct argp_option options[] = {
   {"invert", 'i', 0, 0, "Invert 0 and 1 (default disabled)" },
   {"verbose", 'v', 0, 0, "Print all avaible information" },
   {"sync", 'w', "SYNC_WORD", 0, "Sync word folowed after preambule (default 0x2dd4)" },
+  {"manchester", 'm', "MANCHESTER", 0, "Manchester type: 0 - disabled (do not use manchester), 1 - full packet with preambule is manchester encoded (default 0)" },
   { 0 }
 };
 long unsigned int samples_counter = 0;
@@ -83,6 +84,12 @@ char checkPreambule(float *buf, short length)
     }
     return found;
 }
+enum manchester_mode
+{
+    MANCHESTER_DISABLED = 0,
+    MANCHESTER_FULL = 1
+};
+
 struct arguments
 {
     int BAUDRATE;
@@ -95,6 +102,7 @@ struct arguments
     bool VERBOSE;
     float DETECTION_LEVEL;
     unsigned short SYNC_WORD;
+    enum manchester_mode MANCHESTER; 
 };
 
 static error_t parse_opt(int key, char * arg, struct argp_state * state)
@@ -131,6 +139,20 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
             break;
         case 'w':
             arguments->SYNC_WORD = (unsigned short)strtol(arg, NULL, 16)&0xffff;
+            break;
+        case 'm':
+            switch (atoi(arg))
+            {
+            case 0:
+                arguments->MANCHESTER = MANCHESTER_DISABLED;
+                break;
+            case 1:
+                arguments->MANCHESTER = MANCHESTER_FULL;
+                break;
+            
+            default:
+                return ARGP_ERR_UNKNOWN;
+            }
             break;
         case ARGP_KEY_ARG:
             return 0;
@@ -189,6 +211,7 @@ int main(int argc, char *argv[])
     arguments.VERBOSE = false;
     arguments.DETECTION_LEVEL = 0.99;
     arguments.SYNC_WORD = 0x2dd4;
+    arguments.MANCHESTER = MANCHESTER_DISABLED;
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
     //printf("%x\n", arguments.SYNC_WORD);
     if (arguments.VERBOSE)
@@ -201,8 +224,12 @@ int main(int argc, char *argv[])
     int SAMPLING = arguments.SAMPLING;
     short PREAMBULE_LENGTH = arguments.PREAMBULE_LENGTH;
     short PACKET_LENGTH = arguments.PACKET_LENGTH;
-
-
+    /*
+    if (arguments.MANCHESTER == MANCHESTER_FULL)
+    {
+        BAUDRATE = BAUDRATE*2;
+    }
+    */
     SAMPLES_PER_SYMBOL = (int)SAMPLING/BAUDRATE;
 
     INT_BUFFER_LENGTH = (int)SAMPLES_PER_SYMBOL*0.9;
@@ -232,7 +259,7 @@ int main(int argc, char *argv[])
     float preambule_test[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL];
     for (int i = 0; i < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; i++)
     {
-        float s = sin(3.14/2 + i*3.14/SAMPLES_PER_SYMBOL);
+        float s = sin(i*3.14*(arguments.MANCHESTER == MANCHESTER_FULL ? 2 : 1)/SAMPLES_PER_SYMBOL);
         preambule_test[i] =  s > 0 ? 1 : (s < 0 ? -1 : 0);
         //printf("%i %f\n", i, preambule_test[i]);
     }
@@ -284,14 +311,28 @@ int main(int argc, char *argv[])
                     unsigned char byte = 0;
                     for (int j = 0; j < 8; j++)
                     {
-                        float sample = rwbuf[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL];
-                        
-                        if (sample < threshold)
+                        if (!arguments.MANCHESTER)
                         {
-                            byte = byte << 1 | (arguments.INVERT ? 1 : 0);
+                            float sample = rwbuf[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL];
+                        
+                            if (sample < threshold)
+                            {
+                                byte = byte << 1 | (arguments.INVERT ? 1 : 0);
+                            } else {
+                                byte = byte << 1 | (arguments.INVERT ? 0 : 1);
+                            }
                         } else {
-                            byte = byte << 1 | (arguments.INVERT ? 0 : 1);
+                            float start = rwbuf[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL - SAMPLES_PER_SYMBOL/3];
+                            float end = rwbuf[padding + i*8*SAMPLES_PER_SYMBOL + j*SAMPLES_PER_SYMBOL + SAMPLES_PER_SYMBOL/3];
+                            if (start < end)
+                            {
+                                byte = byte << 1 | (arguments.INVERT ? 1 : 0);
+                            } else {
+                                byte = byte << 1 | (arguments.INVERT ? 0 : 1);
+                            }
+
                         }
+                        
                         /*
                         threshold *= 0.9f;
                         if ( (last_extremum - sample)*(last_extremum - sample) > (max-min)*(max-min)/16 )
