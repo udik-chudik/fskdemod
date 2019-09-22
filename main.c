@@ -9,8 +9,31 @@
 /*
 rtl_fm -p 75 -g 49 -f 437000000 -s 20000 - | sox -t raw -r 20000 -es -b 16 -c 1 - -t raw -r 44000 - sinc 0-2000 compand 0.01,0.01 -100,0 -20 | ~/development/fskdemod/a.out
 */
+enum manchester_mode
+{
+    MANCHESTER_DISABLED = 0,
+    MANCHESTER_FULL = 1
+};
+struct arguments
+{
+    int BAUDRATE;
+    int SAMPLING;
+    short PREAMBULE_LENGTH;
+    short PACKET_LENGTH;
+    bool CRC_CHECK_DISABLE;
+    bool SYNC_WORD_CHECK_DISABLE;
+    bool INVERT;
+    bool VERBOSE;
+    float DETECTION_LEVEL;
+    unsigned short SYNC_WORD;
+    enum manchester_mode MANCHESTER;
+    bool DYNAMIC_PACKET_LENGTH;
+    bool PAYLOAD_ONLY;
+    bool RAW_OUTPUT;
+};
+struct arguments arguments;
 const char *argp_program_version = "argp-ex3 1.0";
-const char *argp_program_bug_address = "<bug-gnu-utils@gnu.org>";
+const char *argp_program_bug_address = "<udikchudik@gmail.com>";
 static char doc[] = "G/FSK demodulator for Si4432";
 static char args_doc[] = "ARG1 ARG2";
 static struct argp_option options[] = {
@@ -25,6 +48,9 @@ static struct argp_option options[] = {
   {"verbose", 'v', 0, 0, "Print all avaible information" },
   {"sync", 'w', "SYNC_WORD", 0, "Sync word folowed after preambule (default 0x2dd4)" },
   {"manchester", 'm', "MANCHESTER", 0, "Manchester type: 0 - disabled (do not use manchester), 1 - full packet with preambule is manchester encoded (default 0)" },
+  {"dynamic-packet-length", 'a', 0, 0, "Enable dynamic packet length (default: false)" },
+  {"payload-only", 'z', 0, 0, "Only payload output (default: false)" },
+  {"raw", 'x', 0, 0, "Raw output (default: false)" },
   { 0 }
 };
 long unsigned int samples_counter = 0;
@@ -33,6 +59,9 @@ int INT_BUFFER_LENGTH;
 windowf intbuf;
 uint16_t crc16(unsigned char* pData, int length)
 {
+    /*
+        CRC-16/BUYPASS (CRC16 IBM)
+    */
     uint8_t i;
     uint16_t wCrc = 0x0000;
     while (length--) {
@@ -44,9 +73,28 @@ uint16_t crc16(unsigned char* pData, int length)
 }
 void print_packet(unsigned char * packet, int length)
 {
+    if (arguments.DYNAMIC_PACKET_LENGTH)
+    {
+        length = packet[2];
+    }
     for (int i = 0; i < length; i++)
     {
-        printf("%02X ", packet[i]);
+        if (arguments.PAYLOAD_ONLY)
+        {
+            if (!arguments.RAW_OUTPUT)
+            {
+                printf("%02X ", packet[i+3]);
+            } else {
+                write(1, &packet[i+3], 1);
+            }
+        } else {
+            if (!arguments.DYNAMIC_PACKET_LENGTH)
+            {
+                printf("%02X ", packet[i]);
+            } else {
+                printf("%02X ", packet[i+3]);
+            }
+        }
     }
 }
 float readSample()
@@ -84,26 +132,9 @@ char checkPreambule(float *buf, short length)
     }
     return found;
 }
-enum manchester_mode
-{
-    MANCHESTER_DISABLED = 0,
-    MANCHESTER_FULL = 1
-};
 
-struct arguments
-{
-    int BAUDRATE;
-    int SAMPLING;
-    short PREAMBULE_LENGTH;
-    short PACKET_LENGTH;
-    bool CRC_CHECK_DISABLE;
-    bool SYNC_WORD_CHECK_DISABLE;
-    bool INVERT;
-    bool VERBOSE;
-    float DETECTION_LEVEL;
-    unsigned short SYNC_WORD;
-    enum manchester_mode MANCHESTER; 
-};
+
+
 
 static error_t parse_opt(int key, char * arg, struct argp_state * state)
 {
@@ -137,8 +168,17 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
         case 'd':
             arguments->DETECTION_LEVEL = atof(arg);
             break;
+        case 'a':
+            arguments->DYNAMIC_PACKET_LENGTH = true;
+            break;
         case 'w':
             arguments->SYNC_WORD = (unsigned short)strtol(arg, NULL, 16)&0xffff;
+            break;
+        case 'z':
+            arguments->PAYLOAD_ONLY = true;
+            break;
+        case 'x':
+            arguments->RAW_OUTPUT = true;
             break;
         case 'm':
             switch (atoi(arg))
@@ -200,7 +240,7 @@ float power(windowf buf, int length)
 static struct argp argp = { options, parse_opt, args_doc, doc };
 int main(int argc, char *argv[])
 {
-    struct arguments arguments;
+    
     arguments.BAUDRATE = 2000;
     arguments.SAMPLING = 44000;
     arguments.PREAMBULE_LENGTH = 32;
@@ -212,8 +252,10 @@ int main(int argc, char *argv[])
     arguments.DETECTION_LEVEL = 0.99;
     arguments.SYNC_WORD = 0x2dd4;
     arguments.MANCHESTER = MANCHESTER_DISABLED;
+    arguments.DYNAMIC_PACKET_LENGTH = false;
+    arguments.PAYLOAD_ONLY = false;
+    arguments.RAW_OUTPUT = false;
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
-    //printf("%x\n", arguments.SYNC_WORD);
     if (arguments.VERBOSE)
     {
         printf("Using:\nBAUDRATE: %i\nSAMPLING: %i\n", arguments.BAUDRATE, arguments.SAMPLING);
@@ -224,12 +266,7 @@ int main(int argc, char *argv[])
     int SAMPLING = arguments.SAMPLING;
     short PREAMBULE_LENGTH = arguments.PREAMBULE_LENGTH;
     short PACKET_LENGTH = arguments.PACKET_LENGTH;
-    /*
-    if (arguments.MANCHESTER == MANCHESTER_FULL)
-    {
-        BAUDRATE = BAUDRATE*2;
-    }
-    */
+
     SAMPLES_PER_SYMBOL = (int)SAMPLING/BAUDRATE;
 
     INT_BUFFER_LENGTH = (int)SAMPLES_PER_SYMBOL*0.9;
@@ -239,13 +276,7 @@ int main(int argc, char *argv[])
         printf("Error: samples per symbol should be greater then 2!\n");
         return -1;
     }
-    /*
-    if (SAMPLING % BAUDRATE)
-    {
-        printf("Error: samples per symbol shoud be integer!\n");
-        return -1;
-    }
-    */
+
 
     windowf wbuf = windowf_create(PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL + PACKET_LENGTH*8*SAMPLES_PER_SYMBOL);
     windowf pbuf = windowf_create(PREAMBULE_LENGTH + 1);
@@ -261,7 +292,6 @@ int main(int argc, char *argv[])
     {
         float s = sin(i*3.14*(arguments.MANCHESTER == MANCHESTER_FULL ? 2 : 1)/SAMPLES_PER_SYMBOL);
         preambule_test[i] =  s > 0 ? 1 : (s < 0 ? -1 : 0);
-        //printf("%i %f\n", i, preambule_test[i]);
     }
     while (1)
     {
@@ -269,15 +299,7 @@ int main(int argc, char *argv[])
         windowf_push(wbuf, sample);
         float * rwbuf;
         windowf_read(wbuf, &rwbuf);
-        //printf("%li %f %f %f\n", samples_counter, correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL), sample*100, power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL));
-        if (1/*rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL - 1]*rwbuf[PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL] < 0*/)
-        {
-            //Zero cross detected
-
-            //windowf_push(pbuf, samples_counter);
-            //float * r;
-            //windowf_read(pbuf, &r);
-            //char t = checkPreambule(r, PREAMBULE_LENGTH + 1);
+            
             if (abs(correlate(preambule_test, wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)) >= power(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL)*arguments.DETECTION_LEVEL)
             {
                 if (arguments.VERBOSE)
@@ -291,19 +313,7 @@ int main(int argc, char *argv[])
                 float last_extremum = 0;
                 float max = 0;
                 float min = 0;
-                /*
-                for (int j = 0; j < PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL; j++)
-                {
-                    if (rwbuf[j] > max)
-                    {
-                        max = rwbuf[j];
-                    }
-                    if (rwbuf[j] < min)
-                    {
-                        min = rwbuf[j];
-                    }
-                } 
-                */
+                
                 threshold = avarage(wbuf, PREAMBULE_LENGTH*SAMPLES_PER_SYMBOL);               
                 unsigned char packet[PACKET_LENGTH];
                 for (int i = 0; i < PACKET_LENGTH; i++)
@@ -332,31 +342,36 @@ int main(int argc, char *argv[])
                             }
 
                         }
-                        
-                        /*
-                        threshold *= 0.9f;
-                        if ( (last_extremum - sample)*(last_extremum - sample) > (max-min)*(max-min)/16 )
-                        {
-                            //If there was extremum change
-                            threshold = (last_extremum + sample)/2;
-                            last_extremum = sample;
-                            
-                        }
-                        */
                     }
                     packet[i] = byte;
                 }
                 if (!arguments.SYNC_WORD_CHECK_DISABLE && packet[0]==(arguments.SYNC_WORD >> 8) && packet[1] == (arguments.SYNC_WORD & 0xFF)) {
-                    //unsigned short received_crc = (*(unsigned short *)&packet[PACKET_LENGTH-2]);
                     if (!arguments.CRC_CHECK_DISABLE)
                     {
                         //Check for CRC
-                        unsigned short received_crc = packet[PACKET_LENGTH-2];
-                        received_crc = received_crc << 8 | packet[PACKET_LENGTH-1];
-                        if (received_crc == crc16(&packet[2], PACKET_LENGTH-2-2))
+                        unsigned short received_crc, calculated_crc;
+                        uint8_t calculated_packet_length;
+                        calculated_packet_length = PACKET_LENGTH;
+                        if (arguments.DYNAMIC_PACKET_LENGTH)
+                        {
+                            calculated_packet_length = packet[2];
+                            received_crc = packet[3 + calculated_packet_length];
+                            received_crc = received_crc << 8 | packet[3 + calculated_packet_length + 1];
+                            calculated_crc =  crc16(&packet[2 + 1], calculated_packet_length);
+                            //printf("%x %x\n", received_crc, calculated_crc);
+                        } else {
+                            received_crc = packet[PACKET_LENGTH-2];
+                            received_crc = received_crc << 8 | packet[PACKET_LENGTH-1];
+                            calculated_crc =  crc16(&packet[2], PACKET_LENGTH-2-2);
+                        }
+                        
+                        if (received_crc == calculated_crc)
                         {
                             print_packet(packet, PACKET_LENGTH);
-                            printf("\n");
+                            if (!arguments.RAW_OUTPUT)
+                            {
+                                printf("\n");
+                            }
                             //If valid packet has been detected, fill buffer with new data
                             for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
                             {
@@ -371,7 +386,10 @@ int main(int argc, char *argv[])
                         }
                     } else {
                         print_packet(packet, PACKET_LENGTH);
-                        printf("\n");
+                        if (!arguments.RAW_OUTPUT)
+                        {
+                            printf("\n");
+                        }
                         //If valid packet has been detected, fill buffer with new data
                         for (int i = 0; i < (PACKET_LENGTH*8*SAMPLES_PER_SYMBOL); i++)
                         {
@@ -397,6 +415,6 @@ int main(int argc, char *argv[])
                     }
                 }
             } 
-        }
+        
     }
 }
