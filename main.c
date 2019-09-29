@@ -6,9 +6,13 @@
 #include <argp.h>
 #include <stdbool.h>
 #include <math.h>
+#include <correct.h>
 /*
 rtl_fm -p 75 -g 49 -f 437000000 -s 20000 - | sox -t raw -r 20000 -es -b 16 -c 1 - -t raw -r 44000 - sinc 0-2000 compand 0.01,0.01 -100,0 -20 | ~/development/fskdemod/a.out
+nc -l -u 7355 | ./a.out --baudrate=2400 --sampling=48000 --preambule-length=32 --detection-level=0.9 --payload-only --raw --disable-crc --reed-solomon 16 --packet-length=39
+
 */
+correct_reed_solomon *rs;
 enum manchester_mode
 {
     MANCHESTER_DISABLED = 0,
@@ -30,6 +34,7 @@ struct arguments
     bool DYNAMIC_PACKET_LENGTH;
     bool PAYLOAD_ONLY;
     bool RAW_OUTPUT;
+    short REED_SOLOMON;
 };
 struct arguments arguments;
 const char *argp_program_version = "argp-ex3 1.0";
@@ -51,6 +56,7 @@ static struct argp_option options[] = {
   {"dynamic-packet-length", 'a', 0, 0, "Enable dynamic packet length (default: false)" },
   {"payload-only", 'z', 0, 0, "Only payload output (default: false)" },
   {"raw", 'x', 0, 0, "Raw output (default: false)" },
+  {"reed-solomon", 'rs', "REED_SOLOMON", 0, "Enable Reed Solomon error correction decoding (default: disabled)" },
   { 0 }
 };
 long unsigned int samples_counter = 0;
@@ -76,6 +82,16 @@ void print_packet(unsigned char * packet, int length)
     if (arguments.DYNAMIC_PACKET_LENGTH)
     {
         length = packet[2];
+    }
+    if (arguments.REED_SOLOMON)
+    {
+        ssize_t encoded = correct_reed_solomon_decode(rs, &packet[3], arguments.DYNAMIC_PACKET_LENGTH ? length : length - 3, &packet[3]);
+        length -= arguments.REED_SOLOMON;
+        if (encoded < 0)
+        {
+            printf("Error! Cant correct code!\n");
+            return;
+        }
     }
     for (int i = 0; i < length; i++)
     {
@@ -194,6 +210,9 @@ static error_t parse_opt(int key, char * arg, struct argp_state * state)
                 return ARGP_ERR_UNKNOWN;
             }
             break;
+        case 'rs':
+            arguments->REED_SOLOMON = atoi(arg);
+            break;
         case ARGP_KEY_ARG:
             return 0;
         default:
@@ -255,11 +274,18 @@ int main(int argc, char *argv[])
     arguments.DYNAMIC_PACKET_LENGTH = false;
     arguments.PAYLOAD_ONLY = false;
     arguments.RAW_OUTPUT = false;
+    arguments.REED_SOLOMON = 0;
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
     if (arguments.VERBOSE)
     {
         printf("Using:\nBAUDRATE: %i\nSAMPLING: %i\n", arguments.BAUDRATE, arguments.SAMPLING);
         printf(" --> %i SAMPLES/SYMBOL\n", (int)arguments.SAMPLING/arguments.BAUDRATE);
+    }
+
+    if (arguments.REED_SOLOMON)
+    {
+        rs = correct_reed_solomon_create(
+        correct_rs_primitive_polynomial_ccsds, 1, 1, arguments.REED_SOLOMON);
     }
 
     int BAUDRATE = arguments.BAUDRATE;

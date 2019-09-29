@@ -1,4 +1,4 @@
 all:
-	gcc -Wall main.c -lliquid -lc -lm
+	gcc -Wall main.c -lliquid -lc -lm -lcorrect
 clean:
 	rm ./a.out
