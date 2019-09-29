@@ -77,6 +77,18 @@ uint16_t crc16(unsigned char* pData, int length)
     }
     return wCrc & 0xffff;
 }
+void print_out(unsigned char * packet, int length, int padding)
+{
+    for (int i = padding; i < padding + length; i++)
+    {
+        if (arguments.RAW_OUTPUT)
+        {
+            write(1, &packet[i], 1);
+        } else {
+            printf("%02X ", packet[i]);
+        }
+    }
+}
 void print_packet(unsigned char * packet, int length)
 {
     if (arguments.DYNAMIC_PACKET_LENGTH)
@@ -93,8 +105,11 @@ void print_packet(unsigned char * packet, int length)
             return;
         }
     }
+    print_out(packet, length - (arguments.PAYLOAD_ONLY ? 3 : 0), arguments.PAYLOAD_ONLY ? 3 : 0);
+    /*
     for (int i = 0; i < length; i++)
     {
+        
         if (arguments.PAYLOAD_ONLY)
         {
             if (!arguments.RAW_OUTPUT)
@@ -112,6 +127,7 @@ void print_packet(unsigned char * packet, int length)
             }
         }
     }
+    */
 }
 float readSample()
 {
